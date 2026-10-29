@@ -379,6 +379,9 @@ bool HasPendingUpload(uint32_t accountId, uint32_t appId) {
             LOG("[Journal] WARNING: failed to persist interrupted upload recovery marker for app %u",
                 appId);
         }
+        // Fail closed for this call even if the journal could not be rewritten.
+        // The in-memory recovery decision must still prevent trusting stale cloud state.
+        return true;
     }
 
     for (const auto& entry : entries) {
