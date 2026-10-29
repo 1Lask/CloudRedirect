@@ -386,6 +386,32 @@ if(EXISTS ${CMAKE_SOURCE_DIR}/tests/autocloud_native_tests.cpp)
     add_test(NAME stats_store_tests COMMAND stats_store_tests)
 endif()
 
+# Keep the journal regression test available in lean source checkouts that
+# do not include the optional native-test suite.
+if(EXISTS ${CMAKE_SOURCE_DIR}/tests/pending_ops_journal_tests.cpp
+   AND NOT EXISTS ${CMAKE_SOURCE_DIR}/tests/autocloud_native_tests.cpp)
+    add_executable(pending_ops_journal_tests
+        tests/pending_ops_journal_tests.cpp
+        src/common/pending_ops_journal.cpp
+        src/common/json.cpp
+    )
+    target_include_directories(pending_ops_journal_tests PRIVATE src/common)
+    if(WIN32)
+        target_include_directories(pending_ops_journal_tests PRIVATE src/platform/win)
+        target_sources(pending_ops_journal_tests PRIVATE
+            src/platform/win/log.cpp
+            src/platform/win/platform_win.cpp
+        )
+    else()
+        target_include_directories(pending_ops_journal_tests PRIVATE src/platform/linux)
+        target_sources(pending_ops_journal_tests PRIVATE
+            src/platform/linux/log.cpp
+            src/platform/linux/platform_linux.cpp
+        )
+    endif()
+    add_test(NAME pending_ops_journal_tests COMMAND pending_ops_journal_tests)
+endif()
+
 # ── UI (Windows only) ───────────────────────────────────────────────────
 
 if(WIN32)
