@@ -358,7 +358,29 @@ std::optional<Entry> LoadCurrentSession(uint32_t accountId, uint32_t appId) {
 
 bool HasPendingUpload(uint32_t accountId, uint32_t appId) {
     std::lock_guard<std::mutex> lock(g_mutex);
-    auto entries = LoadEntriesUnlocked(accountId, appId);
+    std::optional<Entry> currentSession;
+    auto entries = LoadEntriesUnlocked(accountId, appId, &currentSession);
+
+    // A process can terminate after persisting UploadInProgress but before
+    // recording completion. Treat that state as interrupted and persist the
+    // recovery marker so later changelist requests cannot trust stale cloud data.
+    std::optional<Entry> interruptedUpload;
+    for (const auto& entry : entries) {
+        if (entry.operation == Operation::UploadInProgress) {
+            interruptedUpload = BuildDerivedEntry(entry, Operation::UploadPending);
+            break;
+        }
+    }
+
+    if (interruptedUpload.has_value()) {
+        RemoveOperation(entries, Operation::UploadInProgress);
+        ReplaceOrAppendOperation(entries, *interruptedUpload);
+        if (!SaveStateUnlocked(accountId, appId, entries, currentSession)) {
+            LOG("[Journal] WARNING: failed to persist interrupted upload recovery marker for app %u",
+                appId);
+        }
+    }
+
     for (const auto& entry : entries) {
         if (entry.operation == Operation::UploadPending) return true;
     }
