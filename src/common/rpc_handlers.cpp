@@ -2168,6 +2168,7 @@ RpcResult HandleCompleteBatch(uint32_t appId, const std::vector<PB::Field>& reqB
                 }
                 publishSucceeded = true;
                 PendingOpsJournal::RecordUploadBatchEnd(accountId, appId);
+                PendingOpsJournal::ClearUploadRecoveryRequired(accountId, appId);
                 break;
             }
             LOG("[NS] CompleteBatch(pub): publish %d/%d failed for app %u",
@@ -2177,7 +2178,7 @@ RpcResult HandleCompleteBatch(uint32_t appId, const std::vector<PB::Field>& reqB
         if (!publishSucceeded) {
             // Keep a durable recovery marker. Clearing UploadInProgress here
             // would make the next changelist trust a stale cloud manifest.
-            PendingOpsJournal::RecordUploadBatchInterrupted(accountId, appId);
+            PendingOpsJournal::RecordUploadRecoveryRequired(accountId, appId);
             LOG("[NS] CompleteBatch(pub): all publish attempts exhausted for app %u; "
                 "upload remains pending for recovery",
                 appId);
