@@ -13,6 +13,7 @@ enum class Operation : uint32_t {
     UploadInProgress = 2,
     UploadPending = 3,
     AppSessionSuspended = 4,
+    UploadRecoveryRequired = 5,
 };
 
 struct Entry {
@@ -32,6 +33,8 @@ std::vector<Entry> RecordLaunchIntent(uint32_t accountId, uint32_t appId,
                                       bool ignorePendingOperations);
 void RecordUploadBatchStart(uint32_t accountId, uint32_t appId);
 void RecordUploadBatchInterrupted(uint32_t accountId, uint32_t appId);
+void RecordUploadRecoveryRequired(uint32_t accountId, uint32_t appId);
+void ClearUploadRecoveryRequired(uint32_t accountId, uint32_t appId);
 void RecordUploadBatchEnd(uint32_t accountId, uint32_t appId);
 void RecordSuspendState(uint32_t accountId, uint32_t appId,
                         const Entry& session, bool uploadsCompleted);
