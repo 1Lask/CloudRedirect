@@ -563,6 +563,12 @@ RpcResult HandleGetChangelist(uint32_t appId, const std::vector<PB::Field>& reqB
     }
     uint64_t appKey = MakeAppAccountKey(accountId, appId);
 
+    // An interrupted upload means the published cloud manifest may lag behind
+    // the local files even when its CN matches the client's cached CN.
+    // Recover the journal before considering any cached/authoritative cloud state.
+    const bool pendingUploadRecovery =
+        PendingOpsJournal::HasPendingUpload(accountId, appId);
+
     // Inject quota before ComputeLastKnownSyncState can run.
     EnsureAppQuotaInjected(accountId, appId, nullptr);
     EnsureSaveFilesInjected(appId);
@@ -588,7 +594,7 @@ RpcResult HandleGetChangelist(uint32_t appId, const std::vector<PB::Field>& reqB
                 cachedBuildId = GetCachedAppBuildIdHwm(accountId, appId);
             }
         }
-        if (repeatCall) {
+        if (repeatCall && !pendingUploadRecovery) {
             // CN probe; on change, invalidate cache and fall through to full fetch.
             bool probeNeeded = CloudStorage::IsCloudActive() && cachedCN > 0;
             uint64_t remoteCN = probeNeeded
@@ -681,6 +687,15 @@ RpcResult HandleGetChangelist(uint32_t appId, const std::vector<PB::Field>& reqB
             LOG("[NS-CL] GetAppFileChangelist app=%u: cloud state fetch failed (status=%d), using local",
                 appId, static_cast<int>(stateResult.status));
         }
+    }
+
+    // An unresolved local upload takes precedence over a possibly stale cloud
+    // manifest. Serve a local-only delta below; never advertise the fetched cloud
+    // inventory as authoritative until the upload has been resolved.
+    if (pendingUploadRecovery) {
+        inconclusiveFetch = true;
+        LOG("[NS-CL] GetAppFileChangelist app=%u: unresolved upload journal; "
+            "forcing local delta to protect newer local saves", appId);
     }
 
     // Inject quota (cached PICS values or fallback).
@@ -2153,6 +2168,7 @@ RpcResult HandleCompleteBatch(uint32_t appId, const std::vector<PB::Field>& reqB
                 }
                 publishSucceeded = true;
                 PendingOpsJournal::RecordUploadBatchEnd(accountId, appId);
+                PendingOpsJournal::ClearUploadRecoveryRequired(accountId, appId);
                 break;
             }
             LOG("[NS] CompleteBatch(pub): publish %d/%d failed for app %u",
@@ -2160,8 +2176,11 @@ RpcResult HandleCompleteBatch(uint32_t appId, const std::vector<PB::Field>& reqB
         }
 
         if (!publishSucceeded) {
-            PendingOpsJournal::RecordUploadBatchEnd(accountId, appId);
-            LOG("[NS] CompleteBatch(pub): all publish attempts exhausted for app %u",
+            // Keep a durable recovery marker. Clearing UploadInProgress here
+            // would make the next changelist trust a stale cloud manifest.
+            PendingOpsJournal::RecordUploadRecoveryRequired(accountId, appId);
+            LOG("[NS] CompleteBatch(pub): all publish attempts exhausted for app %u; "
+                "upload remains pending for recovery",
                 appId);
         }
         // Resolve the barrier BEFORE GC — session release must not wait on housekeeping.
