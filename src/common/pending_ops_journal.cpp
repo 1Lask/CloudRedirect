@@ -260,6 +260,42 @@ void RecordUploadBatchInterrupted(uint32_t accountId, uint32_t appId) {
     SaveStateUnlocked(accountId, appId, entries, currentSession);
 }
 
+void RecordUploadRecoveryRequired(uint32_t accountId, uint32_t appId) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    std::optional<Entry> currentSession;
+    auto entries = LoadEntriesUnlocked(accountId, appId, &currentSession);
+
+    std::optional<Entry> seed;
+    for (const auto& entry : entries) {
+        if (entry.operation == Operation::UploadInProgress ||
+            entry.operation == Operation::UploadPending ||
+            entry.operation == Operation::UploadRecoveryRequired) {
+            seed = entry;
+            break;
+        }
+    }
+    if (!seed.has_value() && currentSession.has_value()) seed = *currentSession;
+
+    RemoveOperation(entries, Operation::UploadInProgress);
+    RemoveOperation(entries, Operation::UploadRecoveryRequired);
+    if (seed.has_value()) {
+        ReplaceOrAppendOperation(entries,
+            BuildDerivedEntry(*seed, Operation::UploadRecoveryRequired));
+    }
+    if (!SaveStateUnlocked(accountId, appId, entries, currentSession)) {
+        LOG("[Journal] WARNING: failed to persist upload recovery marker for app %u",
+            appId);
+    }
+}
+
+void ClearUploadRecoveryRequired(uint32_t accountId, uint32_t appId) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    std::optional<Entry> currentSession;
+    auto entries = LoadEntriesUnlocked(accountId, appId, &currentSession);
+    RemoveOperation(entries, Operation::UploadRecoveryRequired);
+    SaveStateUnlocked(accountId, appId, entries, currentSession);
+}
+
 void RecordUploadBatchEnd(uint32_t accountId, uint32_t appId) {
     std::lock_guard<std::mutex> lock(g_mutex);
     std::optional<Entry> currentSession;
@@ -367,7 +403,7 @@ bool HasPendingUpload(uint32_t accountId, uint32_t appId) {
     std::optional<Entry> interruptedUpload;
     for (const auto& entry : entries) {
         if (entry.operation == Operation::UploadInProgress) {
-            interruptedUpload = BuildDerivedEntry(entry, Operation::UploadPending);
+            interruptedUpload = BuildDerivedEntry(entry, Operation::UploadRecoveryRequired);
             break;
         }
     }
@@ -385,7 +421,8 @@ bool HasPendingUpload(uint32_t accountId, uint32_t appId) {
     }
 
     for (const auto& entry : entries) {
-        if (entry.operation == Operation::UploadPending) return true;
+        if (entry.operation == Operation::UploadPending ||
+            entry.operation == Operation::UploadRecoveryRequired) return true;
     }
     return false;
 }
